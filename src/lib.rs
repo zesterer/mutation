@@ -1,5 +1,7 @@
 #![feature(generic_associated_types, arbitrary_self_types, trait_alias)]
 
+mod v2;
+
 use core::{
     marker::PhantomData,
     ops::Deref,
