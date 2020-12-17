@@ -1,36 +1,35 @@
 #![feature(generic_associated_types, arbitrary_self_types, trait_alias)]
 
-mod v2;
-
-use core::{
-    marker::PhantomData,
-    ops::Deref,
-};
+use core::ops::Deref;
 
 pub trait IsRef<'a> {
-    type Inner;
+    type Inner: 'a;
     type Mut: Mut;
-    type Ref<'b, U> where U: 'b;
+    type Map<B> where B: 'a;
 
-    fn specialize<'b, U: Specialization, F, G>(self, f: F, g: G) -> U::Ty<Self::Mut>
+    fn map<B: GenMut<'a>, F, G>(
+        self,
+        f: F,
+        g: G,
+    ) -> B::Ty<'a, Self::Mut>
     where
-        'a: 'b,
-        Self::Inner: 'b,
-        F: FnOnce(<Immutable as Mut>::Ref<'b, Self::Inner>) -> U::Ty<Immutable>,
-        G: FnOnce(<Mutable as Mut>::Ref<'b, Self::Inner>) -> U::Ty<Mutable>;
+        F: FnOnce(&'a Self::Inner) -> B::Ty<'a, Immutable>,
+        G: FnOnce(&'a mut Self::Inner) -> B::Ty<'a, Mutable>;
 }
 
 impl<'a, T> IsRef<'a> for &'a T {
     type Inner = T;
     type Mut = Immutable;
-    type Ref<'b, U> where U: 'b = &'b U;
+    type Map<B> where B: 'a = &'a B;
 
-    fn specialize<'b, U: Specialization, F, G>(self, f: F, g: G) -> U::Ty<Self::Mut>
+    fn map<B: GenMut<'a>, F, G>(
+        self,
+        f: F,
+        g: G,
+    ) -> B::Ty<'a, Self::Mut>
     where
-        'a: 'b,
-        Self::Inner: 'b,
-        F: FnOnce(<Immutable as Mut>::Ref<'b, Self::Inner>) -> U::Ty<Immutable>,
-        G: FnOnce(<Mutable as Mut>::Ref<'b, Self::Inner>) -> U::Ty<Mutable>,
+        F: FnOnce(&'a Self::Inner) -> B::Ty<'a, Immutable>,
+        G: FnOnce(&'a mut Self::Inner) -> B::Ty<'a, Mutable>
     {
         f(self)
     }
@@ -39,100 +38,102 @@ impl<'a, T> IsRef<'a> for &'a T {
 impl<'a, T> IsRef<'a> for &'a mut T {
     type Inner = T;
     type Mut = Mutable;
-    type Ref<'b, U> where U: 'b = &'b mut U;
+    type Map<B> where B: 'a = &'a mut B;
 
-    fn specialize<'b, U: Specialization, F, G>(self, f: F, g: G) -> U::Ty<Self::Mut>
+    fn map<B: GenMut<'a>, F, G>(
+        self,
+        f: F,
+        g: G,
+    ) -> B::Ty<'a, Self::Mut>
     where
-        'a: 'b,
-        Self::Inner: 'b,
-        F: FnOnce(<Immutable as Mut>::Ref<'b, Self::Inner>) -> U::Ty<Immutable>,
-        G: FnOnce(<Mutable as Mut>::Ref<'b, Self::Inner>) -> U::Ty<Mutable>,
+        F: FnOnce(&'a Self::Inner) -> B::Ty<'a, Immutable>,
+        G: FnOnce(&'a mut Self::Inner) -> B::Ty<'a, Mutable>
     {
         g(self)
     }
 }
 
+pub trait GenMut<'g> {
+    type Ty<'a, M: Mut> where 'g: 'a;
+}
 
+pub struct GenRef<'a, T>(&'a T);
 
+impl<'g, T: 'g> GenMut<'g> for GenRef<'g, T> {
+    type Ty<'b, M: Mut> where 'g: 'b = M::Ref<'b, T>;
+}
 
+impl<'g, T: GenMut<'g>> GenMut<'g> for Option<T> {
+    type Ty<'b, M: Mut> where 'g: 'b = Option<T::Ty<'b, M>>;
+}
+
+pub struct SliceIter<'a, T>(&'a T);
+
+impl<'g, T: 'g> GenMut<'g> for SliceIter<'g, T> {
+    type Ty<'b, M: Mut> where 'g: 'b = M::SliceIter<'b, T>;
+}
 
 pub trait Mut: Sized {
-    type Ref<'a, T>: Sized + Deref<Target = T> where T: 'a;
-    type Choose<'a, A, B> where A: 'a, B: 'a;
+    type Ref<'a, T>: Deref<Target = T> where T: 'a;
+    type SliceIter<'a, T>: Iterator<Item = Self::Ref<'a, T>> where T: 'a;
 }
 
 pub struct Immutable;
-
 impl Mut for Immutable {
     type Ref<'a, T> where T: 'a = &'a T;
-    type Choose<'a, A, B> where A: 'a, B: 'a = A;
+    type SliceIter<'a, T> where T: 'a = core::slice::Iter<'a, T>;
 }
 
 pub struct Mutable;
-
 impl Mut for Mutable {
     type Ref<'a, T> where T: 'a = &'a mut T;
-    type Choose<'a, A, B> where A: 'a, B: 'a = B;
+    type SliceIter<'a, T> where T: 'a = core::slice::IterMut<'a, T>;
 }
-
-pub trait Specialization {
-    type Ty<M: Mut>;
-}
-
-pub type RefMap<'a, R, T> = <<R as IsRef<'a>>::Mut as Mut>::Ref<'a, T>;
 
 pub trait Ref<'a, T> = IsRef<'a, Inner = T> + Deref<Target = T>;
 
-pub mod prelude {
-    use super::{Ref, RefMap, Mut, Specialization};
+pub type RefMap<'a, R, T> = <GenRef<'a, T> as GenMut<'a>>::Ty<'a, <R as IsRef<'a>>::Mut>;
+
+pub struct MyVec<T>(Vec<T>);
+
+impl<T> MyVec<T> {
+    pub fn get<'a, R: Ref<'a, Self>>(self: R, idx: usize) -> Option<RefMap<'a, R, T>> {
+        self.map::<Option<GenRef<T>>, _, _>(
+            |this: &Self| this.0.get(idx),
+            |this: &mut Self| this.0.get_mut(idx),
+        )
+    }
+
+    pub fn get_expect<'a, R: Ref<'a, Self>>(self: R, idx: usize) -> RefMap<'a, R, T> {
+        self.get(idx).unwrap()
+    }
+
+    pub fn iter<'a, R: Ref<'a, Self>>(self: R) -> impl Iterator<Item = RefMap<'a, R, T>> where T: 'a {
+        self.map::<SliceIter<T>, _, _>(
+            |this: &Self| this.0.iter(),
+            |this: &mut Self| this.0.iter_mut(),
+        )
+    }
+
+    pub fn iter_positive<'a, R: Ref<'a, Self>>(self: R) -> impl Iterator<Item = RefMap<'a, R, T>>
+        where T: PartialOrd<i32> + 'a
+    {
+        self.iter().filter(|x| **x >= 0)
+    }
 }
 
 #[test]
 fn basic() {
-    struct MyVec<T>(Vec<T>);
+    let mut x = MyVec(vec![-1, 2, 3, 4]);
 
-    impl<T> MyVec<T> {
-        /*
-        pub fn iter<'a, R: Ref<'a, Self>>(self: R) -> impl Iterator<Item = RefMap<'a, R, T>> {
-            struct Iter<'a, T>(&'a T);
-            impl<'a, T> Specialization for Iter<'a, T> {
-                type Ty<M: Mut> = M::Choose<
-                    'a,
-                    std::slice::Iter<'a, T>,
-                    std::slice::IterMut<'a, T>,
-                >;
-            }
+    assert_eq!((&x).iter().copied().sum::<i32>(), 8);
 
-            R::specialize::<Iter<_>, _, _>(
-                self,
-                |this| this.0.iter(),
-                |this| this.0.iter_mut(),
-            )
-        }
-        */
+    assert_eq!((&x).iter_positive().copied().sum::<i32>(), 9);
 
-        pub fn get<'a, R: Ref<'a, Self>>(self: R, idx: usize) -> Option<RefMap<'a, R, T>> {
-            struct OptionRef<'a, T>(&'a T);
+    *(&mut x).get(1).unwrap() = 3;
+    assert_eq!(*x.get_expect(1), 3);
 
-            impl<'a, T> Specialization for OptionRef<'a, T> {
-                type Ty<M: Mut> = Option<M::Ref<'a, T>>;
-            }
+    (&mut x).iter_positive().for_each(|x| *x = 1);
 
-            R::specialize::<OptionRef<_>, _, _>(
-                self,
-                |this| this.0.get(idx),
-                |this| this.0.get_mut(idx),
-            )
-        }
-
-        pub fn get_expect<'a, R: Ref<'a, Self>>(self: R, idx: usize) -> RefMap<'a, R, T> {
-            self.get(idx).unwrap()
-        }
-    }
-
-    let mut x = MyVec(vec![1, 2, 3, 4, 5]);
-
-    assert_eq!(x.get(2), Some(&3));
-    *(&mut x).get(2).unwrap() = 4;
-    assert_eq!(x.get(2), Some(&4));
+    assert_eq!(x.0, vec![-1, 1, 1, 1]);
 }
