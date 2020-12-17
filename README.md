@@ -37,35 +37,6 @@ impl<T> MyVec<T> {
     /// This function 'glues' our generic-over-mutation API to the underlying
     /// non-generic API of `Vec`.
     pub fn get<'a, R: Ref<'a, Self>>(self: R, idx: usize) -> Option<RefMap<'a, R, T>> {
-        /// This function returns an `Option`! We need to tell Mutation how to
-        /// specialise an `Option` over mutation.
-        struct OptionRef<'a, T>(&'a T);
-        impl<'a, T> Specialization for OptionRef<'a, T> {
-            type Ty<M: Mut> = Option<M::Ref<'a, T>>;
-        }
-
-        /// The underlying `Vec` is not generic over mutation, so here we
-        /// specialize our function with the corresponding function of `Vec`.
-        R::specialize::<OptionRef<_>, _, _>(
-            self,
-            |this| this.0.get(idx),
-            |this| this.0.get_mut(idx),
-        )
-    }
-
-    /// And now for some functions that are truly generic over mutation using
-    /// the API above...
-
-    /// This function works for both mutable and immutable references!
-    pub fn get_expect<'a, R: Ref<'a, Self>>(self: R, idx: usize) -> RefMap<'a, R, T> {
-        self.get(idx).unwrap()
-    }
-}
-
-impl<T> MyVec<T> {
-    /// This function 'glues' our generic-over-mutation API to the underlying
-    /// non-generic API of `Vec`.
-    pub fn get<'a, R: Ref<'a, Self>>(self: R, idx: usize) -> Option<RefMap<'a, R, T>> {
         /// The underlying `Vec` is not generic over mutation, so here we
         /// specialize our function with the corresponding function of `Vec`.
         self.map::<Option<GenRef<T>>, _, _>(
