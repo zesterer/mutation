@@ -76,10 +76,10 @@ impl<T> MyVec<T> {
 
 let mut my_vec = MyVec(vec![1, 2, 3]);
 
-assert_eq!((&x).iter().copied().sum::<i32>(), 8);
+assert_eq!((&my_vec).iter().copied().sum::<i32>(), 8);
 
 // Iterate elements immutably
-assert_eq!((&x).iter_positive().copied().sum::<i32>(), 9);
+assert_eq!((&my_vec).iter_positive().copied().sum::<i32>(), 9);
 
 // Mutate the second element
 *(&mut my_vec).get_expect(1) = 4;
@@ -88,7 +88,7 @@ assert_eq!((&x).iter_positive().copied().sum::<i32>(), 9);
 assert_eq!(my_vec.get_expect(1), Some(&4));
 
 // Iterate elements mutably, giving each a value of 1
-(&mut x).iter_positive().for_each(|x| *x = 1);
+(&mut my_vec).iter_positive().for_each(|x| *x = 1);
 
-assert_eq!(x.0, vec![-1, 1, 1, 1]);
+assert_eq!(my_vec.0, vec![-1, 1, 1, 1]);
 ```
